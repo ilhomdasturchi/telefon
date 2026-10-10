@@ -71,6 +71,28 @@ def pcmu_to_linear16(pcmu: bytes) -> bytes:
     return bytes(out)
 
 
+def _alaw_to_linear_sample(a_val: int) -> int:
+    a_val ^= 0x55
+    t = (a_val & 0x0F) << 4
+    seg = (a_val & 0x70) >> 4
+    if seg == 0:
+        t += 8
+    elif seg == 1:
+        t += 0x108
+    else:
+        t += 0x108
+        t <<= seg - 1
+    return t if (a_val & 0x80) else -t
+
+
+def pcma_to_linear16(pcma: bytes) -> bytes:
+    """G.711 A-law → PCM16 LE."""
+    out = bytearray(len(pcma) * 2)
+    for i, b in enumerate(pcma):
+        struct.pack_into("<h", out, i * 2, _alaw_to_linear_sample(b))
+    return bytes(out)
+
+
 def resample_pcm16(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
     """Linear interpolation resampler for mono int16 PCM."""
     if src_rate == dst_rate or not pcm:

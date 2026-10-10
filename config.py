@@ -252,8 +252,8 @@ GREETINGS = [
         "lock": False,
     },
 ]
-# Greeting TTS: "mms" (local Uzbek, natural), "edge", or "gemini" (quota-limited)
-GREETING_TTS_ENGINE = os.environ.get("GREETING_TTS_ENGINE", "mms")
+# Greeting TTS: "edge", "gemini", or "mms" (mms needs optional torch — not installed by default)
+GREETING_TTS_ENGINE = os.environ.get("GREETING_TTS_ENGINE", "edge")
 MMS_TTS_MODEL = os.environ.get(
     "MMS_TTS_MODEL",
     "MuzaffarSharofitdinov/mms-tts-uzbek-girl-voice_cyrillic",

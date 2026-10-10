@@ -234,16 +234,24 @@ class AiCallController:
         with self._lock:
             if self._bridge is not bridge or self._hanging_up:
                 return
-        rx = getattr(bridge, "_rx_packets", 0)
-        if rx == 0:
+        audio_rx = getattr(bridge, "_rx_packets", 0)
+        any_rx = getattr(bridge, "_rx_datagrams", 0)
+        if audio_rx == 0:
             adv = self.pbx.advertise_ip if self.pbx else "?"
-            print(
-                f"[ai] WARNING: no RTP from phone yet — AI cannot hear you. "
-                f"Check Windows Firewall (UDP {bridge.local_port}), "
-                f"and set SIP_ADVERTISE_IP in .env to this server's LAN IP "
-                f"(currently advertising {adv}).",
-                flush=True,
-            )
+            if any_rx:
+                print(
+                    f"[ai] WARNING: got {any_rx} UDP packet(s) on RTP port but no PCMU/PCMA audio. "
+                    f"Check phone codec (use G.711 u-law or A-law).",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"[ai] WARNING: no UDP at all on {bridge.bind_ip}:{bridge.local_port} — "
+                    f"phone mic RTP is not reaching this PC. "
+                    f"On the SERVER open Windows Firewall inbound UDP 10000-10200 "
+                    f"(and 5060). SIP_ADVERTISE_IP={adv}. RDP is unrelated.",
+                    flush=True,
+                )
 
     def _start_idle_unlocked(self) -> None:
         self._idle_stop.clear()

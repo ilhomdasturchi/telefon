@@ -1,12 +1,13 @@
 """
 Generate pre-recorded Uzbek greeting WAVs.
 
-Default engine is local MMS Uzbek TTS (natural, no API quota).
+Default engine is Edge TTS (no PyTorch). MMS is optional: pip install torch transformers.
 
   python generate_greeting.py
   python generate_greeting.py --force
   python generate_greeting.py --engine edge --force
   python generate_greeting.py --engine gemini --force
+  python generate_greeting.py --engine mms --force
 """
 
 from __future__ import annotations
@@ -156,8 +157,15 @@ def _load_mms():
     if _mms_model is not None:
         return _mms_model, _mms_tokenizer
 
-    import torch
-    from transformers import AutoTokenizer, VitsModel
+    try:
+        import torch
+        from transformers import AutoTokenizer, VitsModel
+    except ImportError as exc:
+        raise SystemExit(
+            "MMS TTS needs PyTorch + transformers (optional, not in requirements.txt).\n"
+            "  pip install torch transformers\n"
+            "Or use --engine edge / --engine gemini."
+        ) from exc
 
     repo = getattr(
         config,
@@ -274,9 +282,9 @@ def main() -> int:
         "--engine",
         choices=("mms", "edge", "gemini"),
         default=os.environ.get(
-            "GREETING_TTS_ENGINE", getattr(config, "GREETING_TTS_ENGINE", "mms")
+            "GREETING_TTS_ENGINE", getattr(config, "GREETING_TTS_ENGINE", "edge")
         ),
-        help="TTS backend (default: mms — local Uzbek, no API quota)",
+        help="TTS backend (default: edge; mms needs optional torch)",
     )
     args = parser.parse_args()
 

@@ -17,7 +17,7 @@ import time
 from typing import Callable, Optional
 
 import config
-from audio_codec import linear16_to_pcmu, pcmu_to_linear16, resample_pcm16
+from audio_codec import linear16_to_pcmu, pcma_to_linear16, pcmu_to_linear16, resample_pcm16
 
 
 def _apply_gain_pcm16(pcm: bytes, gain: float) -> bytes:
@@ -68,12 +68,14 @@ class RtpBridge:
         self._seq = random.randint(0, 0xFFFF)
         self._timestamp = random.randint(0, 0xFFFFFFFF)
         self._rx_packets = 0
+        self._rx_datagrams = 0
         self._tx_packets = 0
 
     def start(self) -> None:
         self._sock.bind((self.bind_ip, self.local_port))
         self._stop.clear()
         self._rx_packets = 0
+        self._rx_datagrams = 0
         self._tx_packets = 0
         self._rx_thread = threading.Thread(target=self._rx_loop, name="rtp-rx", daemon=True)
         self._tx_thread = threading.Thread(target=self._tx_loop, name="rtp-tx", daemon=True)
@@ -191,15 +193,32 @@ class RtpBridge:
                 continue
             except OSError:
                 break
+            self._rx_datagrams += 1
             parsed = self._rtp_payload(data)
             if not parsed:
+                if self._rx_datagrams <= 5:
+                    print(
+                        f"[rtp] rx datagram #{self._rx_datagrams} from {addr[0]}:{addr[1]} "
+                        f"len={len(data)} (not RTP / parse failed)",
+                        flush=True,
+                    )
                 continue
             pt, payload = parsed
             # Learn actual RTP source (NAT / SDP mismatch)
             if addr[0]:
                 self.remote = addr
-            # PT 0 = PCMU; accept also dynamic? keep PCMU only for now
-            if pt != 0 or not payload:
+            # PT 0 = PCMU, PT 8 = PCMA; ignore DTMF telephone-event (usually 101)
+            if pt == 0 and payload:
+                pcm8 = pcmu_to_linear16(payload)
+            elif pt == 8 and payload:
+                pcm8 = pcma_to_linear16(payload)
+            else:
+                if self._rx_datagrams <= 8:
+                    print(
+                        f"[rtp] rx ignore from {addr[0]}:{addr[1]} pt={pt} len={len(payload)} "
+                        f"(want PT 0/8 PCMU/PCMA)",
+                        flush=True,
+                    )
                 continue
             self._rx_packets += 1
             if self._rx_packets in {1, 50, 250}:
@@ -207,7 +226,6 @@ class RtpBridge:
                     f"[rtp] rx #{self._rx_packets} from {addr[0]}:{addr[1]} pt={pt} len={len(payload)}",
                     flush=True,
                 )
-            pcm8 = pcmu_to_linear16(payload)
             pcm16 = resample_pcm16(pcm8, PHONE_RATE, GEMINI_IN_RATE)
             pcm16 = _apply_gain_pcm16(pcm16, getattr(config, "MIC_GAIN", 1.0))
             if self.on_pcm16_16k and pcm16:
