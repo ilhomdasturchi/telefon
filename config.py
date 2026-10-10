@@ -1,10 +1,56 @@
 """Local SIP PBX settings for the IP phone."""
 
 import os
+import socket
 
-# This PC (SIP server the phone registers to)
-BIND_IP = "192.168.1.100"
-SIP_PORT = 5060
+from app_paths import resource_dir
+
+_RESOURCE_DIR = str(resource_dir())
+
+# This PC (SIP server the phone registers to).
+# BIND_IP=0.0.0.0 listens on all interfaces; set a specific IP to bind only that one.
+BIND_IP = (os.environ.get("BIND_IP") or "0.0.0.0").strip() or "0.0.0.0"
+# IP written into SIP Contact / SDP. Required when BIND_IP=0.0.0.0 (auto-detected if empty).
+SIP_ADVERTISE_IP = (os.environ.get("SIP_ADVERTISE_IP") or "").strip()
+SIP_PORT = int((os.environ.get("SIP_PORT") or "5060").strip() or "5060")
+
+
+def local_ip_toward(peer_ip: str) -> str | None:
+    """Local IPv4 used to reach peer_ip (picks the right NIC on multi-homed hosts)."""
+    peer_ip = (peer_ip or "").strip()
+    if not peer_ip or peer_ip in ("0.0.0.0", "127.0.0.1"):
+        return None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            sock.connect((peer_ip, 9))
+            ip = sock.getsockname()[0]
+            if ip and not ip.startswith("0."):
+                return ip
+        finally:
+            sock.close()
+    except OSError:
+        return None
+    return None
+
+
+def resolve_advertise_ip(bind_ip: str | None = None, peer_ip: str | None = None) -> str:
+    """Real IPv4 for SIP/SDP (never 0.0.0.0). Prefer peer-directed NIC, then bind, then default route."""
+    if SIP_ADVERTISE_IP:
+        return SIP_ADVERTISE_IP
+    bind = (bind_ip if bind_ip is not None else BIND_IP).strip() or "0.0.0.0"
+    if bind not in ("0.0.0.0", "::", "[::]"):
+        return bind
+    toward = local_ip_toward(peer_ip or "")
+    if toward:
+        return toward
+    toward = local_ip_toward("8.8.8.8")
+    if toward:
+        return toward
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except OSError:
+        return "127.0.0.1"
 
 # RTP port range used when this PBX places a call
 RTP_PORT = 10000
@@ -29,7 +75,7 @@ GEMINI_LIVE_GOOGLE_SEARCH = os.environ.get("GEMINI_LIVE_GOOGLE_SEARCH", "0").str
 # Ring before AI answers (phone plays local ringback on 180 Ringing)
 AI_RING_SECONDS = 1.5
 # Phone mic → Gemini (narrowband RTP is quiet; slight boost helps ASR)
-MIC_GAIN = 2.2
+MIC_GAIN = float((os.environ.get("MIC_GAIN") or "2.2").strip() or "2.2")
 GEMINI_SYSTEM_INSTRUCTION = (
     "This AI name is Alomat, 22 years old girl lives in internet"
     "If asks about creator (even of this AI) Say 'Bizni Allah yaratgan'"
@@ -49,7 +95,7 @@ GEMINI_SYSTEM_INSTRUCTION = (
 
 # Pre-recorded call phrases (WAV under PHRASE_DIR). One of each category per call.
 # Generate: python generate_phrases.py --force
-PHRASE_DIR = os.path.join(os.path.dirname(__file__), "assets", "phrases")
+PHRASE_DIR = os.path.join(_RESOURCE_DIR, "assets", "phrases")
 _PHRASE_CALM = (
     "Calm natural adult Uzbek phone voice. Neutral, understated. "
     "NOT cheerful, NOT excited. Like a polite receptionist."
@@ -138,7 +184,7 @@ _CALM = (
     "Like a polite receptionist answering a call."
 )
 
-GREETING_DIR = os.path.join(os.path.dirname(__file__), "assets", "greetings")
+GREETING_DIR = os.path.join(_RESOURCE_DIR, "assets", "greetings")
 GREETINGS = [
     {
         "id": "labbay",

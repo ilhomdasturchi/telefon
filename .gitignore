@@ -5,3 +5,7 @@ __pycache__/
 venv/
 node_modules/
 .pm2/
+build/
+dist/
+*.spec.bak
+

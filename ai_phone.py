@@ -24,13 +24,19 @@ import sys
 import threading
 import time
 
+from dotenv import load_dotenv
+
+from app_paths import env_path
+
+# Load .env before config so BIND_IP / GEMINI_* apply at import time.
+load_dotenv(env_path())
+
 import truststore
 
 truststore.inject_into_ssl()
 
-from dotenv import load_dotenv
-
 import config
+from autostart import ensure_autostart, remove_autostart
 from gemini_live import GeminiLiveSession
 from greeting import pick_random_phrase, play_random_greeting, play_wav
 from rtp_bridge import RtpBridge
@@ -149,8 +155,14 @@ class AiCallController:
                 print("[ai] answered but no remote RTP in SDP", flush=True)
                 return
 
+            # Bind RTP on the advertised LAN IP (not 0.0.0.0) so:
+            # - TX packets leave with the IP the phone expects (symmetric RTP)
+            # - RX listens on the same address put in SDP
+            rtp_bind = self.bind_ip
+            if self.pbx and self.bind_ip in ("0.0.0.0", "::", "[::]"):
+                rtp_bind = self.pbx.advertise_ip
             bridge = RtpBridge(
-                bind_ip=self.bind_ip,
+                bind_ip=rtp_bind,
                 local_port=call.local_rtp,
                 remote=call.remote_rtp,
             )
@@ -203,6 +215,35 @@ class AiCallController:
             self._idle_last_tick = time.time()
             self._start_idle_unlocked()
             print("[ai] Gemini connected — gapiring (speak)", flush=True)
+            if self.pbx:
+                print(
+                    f"[ai] phone should send RTP to {self.pbx.advertise_ip}:{call.local_rtp} "
+                    f"(set SIP_ADVERTISE_IP in .env if this IP is wrong)",
+                    flush=True,
+                )
+            threading.Thread(
+                target=self._warn_if_no_rtp,
+                args=(bridge,),
+                name="rtp-rx-watch",
+                daemon=True,
+            ).start()
+
+    def _warn_if_no_rtp(self, bridge: RtpBridge) -> None:
+        """If the phone never sends mic RTP, Gemini cannot hear the user."""
+        time.sleep(4.0)
+        with self._lock:
+            if self._bridge is not bridge or self._hanging_up:
+                return
+        rx = getattr(bridge, "_rx_packets", 0)
+        if rx == 0:
+            adv = self.pbx.advertise_ip if self.pbx else "?"
+            print(
+                f"[ai] WARNING: no RTP from phone yet — AI cannot hear you. "
+                f"Check Windows Firewall (UDP {bridge.local_port}), "
+                f"and set SIP_ADVERTISE_IP in .env to this server's LAN IP "
+                f"(currently advertising {adv}).",
+                flush=True,
+            )
 
     def _start_idle_unlocked(self) -> None:
         self._idle_stop.clear()
@@ -377,10 +418,14 @@ class AiCallController:
 
 
 def main() -> int:
-    load_dotenv()
+    load_dotenv(env_path(), override=True)
 
     parser = argparse.ArgumentParser(description="AI voice phone via Gemini Live")
-    parser.add_argument("--bind", default=config.BIND_IP)
+    parser.add_argument(
+        "--bind",
+        default=os.environ.get("BIND_IP", config.BIND_IP).strip() or config.BIND_IP,
+        help="SIP bind IP (0.0.0.0 = all interfaces); or set BIND_IP in .env",
+    )
     parser.add_argument("--port", type=int, default=config.SIP_PORT)
     parser.add_argument("--ext", default=config.PHONE_EXTENSION)
     parser.add_argument(
@@ -393,12 +438,28 @@ def main() -> int:
         "--model",
         default=os.environ.get("GEMINI_LIVE_MODEL", config.GEMINI_LIVE_MODEL),
     )
+    parser.add_argument(
+        "--no-autostart",
+        action="store_true",
+        help="do not register Windows login auto-start (frozen .exe only)",
+    )
+    parser.add_argument(
+        "--uninstall-autostart",
+        action="store_true",
+        help="remove Windows login auto-start and exit",
+    )
     args = parser.parse_args()
+
+    if args.uninstall_autostart:
+        remove_autostart()
+        return 0
+    if not args.no_autostart:
+        ensure_autostart()
 
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         print("Missing GEMINI_API_KEY.")
-        print("Copy .env.example to .env and paste your key from https://aistudio.google.com/apikey")
+        print(f"Create {env_path()} with GEMINI_API_KEY=... from https://aistudio.google.com/apikey")
         return 1
 
     controller = AiCallController(api_key=api_key, model=args.model, bind_ip=args.bind)

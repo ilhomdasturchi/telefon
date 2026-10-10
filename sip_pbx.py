@@ -200,6 +200,8 @@ class SipPbx:
         on_call_ended: Optional[Callable[[], None]] = None,
     ):
         self.bind_ip = bind_ip
+        # SIP/SDP must advertise a real IP (not 0.0.0.0). Updated toward phone on REGISTER.
+        self.advertise_ip = config.resolve_advertise_ip(bind_ip)
         self.sip_port = sip_port
         self.accounts = accounts
         self.rtp_port = rtp_port
@@ -227,6 +229,8 @@ class SipPbx:
         self.sock.bind((self.bind_ip, self.sip_port))
         threading.Thread(target=self._recv_loop, name="sip-recv", daemon=True).start()
         print(f"[pbx] listening on udp://{self.bind_ip}:{self.sip_port}", flush=True)
+        if self.bind_ip in ("0.0.0.0", "::", "[::]"):
+            print(f"[pbx] SIP/SDP advertise IP: {self.advertise_ip}", flush=True)
         print(f"[pbx] accounts: {', '.join(sorted(self.accounts))}", flush=True)
         print("[pbx] waiting for phone REGISTER...", flush=True)
 
@@ -314,7 +318,7 @@ class SipPbx:
             f"To: {to}",
             f"Call-ID: {req.header('Call-ID')}",
             f"CSeq: {req.header('CSeq')}",
-            f"Contact: <sip:pbx@{self.bind_ip}:{self.sip_port}>",
+            f"Contact: <sip:pbx@{self.advertise_ip}:{self.sip_port}>",
             f"User-Agent: telefon-pbx/1.0",
             "Allow: INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER",
         ]
@@ -402,6 +406,7 @@ class SipPbx:
             endpoint=endpoint,
             expires=expires,
         )
+        self._refresh_advertise_ip(endpoint[0])
         self._emit(f"[pbx] REGISTERED {to_user} -> {endpoint[0]}:{endpoint[1]} (expires={expires})")
         self._reply(
             req,
@@ -490,7 +495,7 @@ class SipPbx:
             f"To: {to}",
             f"Call-ID: {req.header('Call-ID')}",
             f"CSeq: {req.header('CSeq')}",
-            f"Contact: <sip:pbx@{self.bind_ip}:{self.sip_port}>",
+            f"Contact: <sip:pbx@{self.advertise_ip}:{self.sip_port}>",
             "User-Agent: telefon-pbx/1.0",
             "Allow: INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER",
         ]
@@ -550,9 +555,9 @@ class SipPbx:
         port = rtp_port or self.rtp_port
         return (
             "v=0\r\n"
-            f"o=pbx {int(time.time())} {int(time.time())} IN IP4 {self.bind_ip}\r\n"
+            f"o=pbx {int(time.time())} {int(time.time())} IN IP4 {self.advertise_ip}\r\n"
             "s=telefon\r\n"
-            f"c=IN IP4 {self.bind_ip}\r\n"
+            f"c=IN IP4 {self.advertise_ip}\r\n"
             "t=0 0\r\n"
             f"m=audio {port} RTP/AVP 0 101\r\n"
             "a=rtpmap:0 PCMU/8000\r\n"
@@ -621,11 +626,23 @@ class SipPbx:
             return "idle"
         return f"{self.call.state}/{self.call.direction} peer={self.call.remote_ext or '?'}"
 
+    def _refresh_advertise_ip(self, peer_ip: str) -> None:
+        """Pick the NIC facing the phone so SDP/Contact RTP reaches us."""
+        if config.SIP_ADVERTISE_IP:
+            return
+        if self.bind_ip not in ("0.0.0.0", "::", "[::]"):
+            return
+        new_ip = config.resolve_advertise_ip(self.bind_ip, peer_ip=peer_ip)
+        if new_ip and new_ip != self.advertise_ip:
+            self._emit(f"[pbx] SIP/SDP advertise IP: {self.advertise_ip} -> {new_ip} (toward {peer_ip})")
+            self.advertise_ip = new_ip
+
     def answer(self) -> bool:
         call = self.call
         if not call or call.direction != "in" or call.state != "ringing" or not call.invite_req:
             self._emit("[call] nothing to answer")
             return False
+        self._refresh_advertise_ip(call.remote_sip[0])
         sdp = self._local_sdp(call.local_rtp)
         self._reply_call(call.invite_req, 200, "OK", body=sdp)
         call.state = "active"
@@ -658,7 +675,7 @@ class SipPbx:
             cancel = "\r\n".join(
                 [
                     f"CANCEL {call.request_uri} SIP/2.0",
-                    f"Via: SIP/2.0/UDP {self.bind_ip}:{self.sip_port};branch={call.branch};rport",
+                    f"Via: SIP/2.0/UDP {self.advertise_ip}:{self.sip_port};branch={call.branch};rport",
                     "Max-Forwards: 70",
                     f"From: {call.from_header}",
                     f"To: {call.to_header}",
@@ -692,7 +709,7 @@ class SipPbx:
         bye = "\r\n".join(
             [
                 f"BYE {bye_uri} SIP/2.0",
-                f"Via: SIP/2.0/UDP {self.bind_ip}:{self.sip_port};branch=z9hG4bK{uuid.uuid4().hex};rport",
+                f"Via: SIP/2.0/UDP {self.advertise_ip}:{self.sip_port};branch=z9hG4bK{uuid.uuid4().hex};rport",
                 "Max-Forwards: 70",
                 f"From: {bye_from}",
                 f"To: {bye_to}",
@@ -727,8 +744,8 @@ class SipPbx:
         cseq_num = 1
         cseq = f"{cseq_num} INVITE"
         request_uri = f"sip:{extension}@{reg.endpoint[0]}:{reg.endpoint[1]}"
-        from_header = f"{_quote('PBX')} <sip:pbx@{self.bind_ip}>;tag={from_tag}"
-        to_header = f"{_quote(extension)} <sip:{extension}@{self.bind_ip}>"
+        from_header = f"{_quote('PBX')} <sip:pbx@{self.advertise_ip}>;tag={from_tag}"
+        to_header = f"{_quote(extension)} <sip:{extension}@{self.advertise_ip}>"
         sdp = self._local_sdp(local_rtp)
 
         self.call = CallSession(
@@ -748,13 +765,13 @@ class SipPbx:
         invite = "\r\n".join(
             [
                 f"INVITE {request_uri} SIP/2.0",
-                f"Via: SIP/2.0/UDP {self.bind_ip}:{self.sip_port};branch={branch};rport",
+                f"Via: SIP/2.0/UDP {self.advertise_ip}:{self.sip_port};branch={branch};rport",
                 "Max-Forwards: 70",
                 f"From: {from_header}",
                 f"To: {to_header}",
                 f"Call-ID: {call_id}",
                 f"CSeq: {cseq}",
-                f"Contact: <sip:pbx@{self.bind_ip}:{self.sip_port}>",
+                f"Contact: <sip:pbx@{self.advertise_ip}:{self.sip_port}>",
                 "User-Agent: telefon-pbx/1.0",
                 "Allow: INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER",
                 "Content-Type: application/sdp",
@@ -795,13 +812,13 @@ class SipPbx:
         ack = "\r\n".join(
             [
                 f"ACK {request_uri} SIP/2.0",
-                f"Via: SIP/2.0/UDP {self.bind_ip}:{self.sip_port};branch=z9hG4bK{uuid.uuid4().hex};rport",
+                f"Via: SIP/2.0/UDP {self.advertise_ip}:{self.sip_port};branch=z9hG4bK{uuid.uuid4().hex};rport",
                 "Max-Forwards: 70",
                 f"From: {from_header}",
                 f"To: {self.call.to_header}",
                 f"Call-ID: {call_id}",
                 f"CSeq: {cseq_num} ACK",
-                f"Contact: <sip:pbx@{self.bind_ip}:{self.sip_port}>",
+                f"Contact: <sip:pbx@{self.advertise_ip}:{self.sip_port}>",
                 "Content-Length: 0",
                 "",
                 "",
@@ -846,7 +863,12 @@ class SipPbx:
             payload = make_tone_pcmu(seconds=max(seconds, 0.2) if seconds > 0 else 1.0, freq=440.0)
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
-                sock.bind((self.bind_ip, bind_port or 0))
+                rtp_ip = (
+                    self.advertise_ip
+                    if self.bind_ip in ("0.0.0.0", "::", "[::]")
+                    else self.bind_ip
+                )
+                sock.bind((rtp_ip, bind_port or 0))
                 ssrc = random.randint(1, 0xFFFFFFFF)
                 seq = random.randint(0, 0xFFFF)
                 timestamp = random.randint(0, 0xFFFFFFFF)
@@ -905,7 +927,12 @@ class SipPbx:
         payload = make_tone_pcmu(seconds=seconds, freq=440.0)
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            sock.bind((self.bind_ip, bind_port or 0))
+            rtp_ip = (
+                self.advertise_ip
+                if self.bind_ip in ("0.0.0.0", "::", "[::]")
+                else self.bind_ip
+            )
+            sock.bind((rtp_ip, bind_port or 0))
             ssrc = random.randint(1, 0xFFFFFFFF)
             seq = random.randint(0, 0xFFFF)
             timestamp = random.randint(0, 0xFFFFFFFF)

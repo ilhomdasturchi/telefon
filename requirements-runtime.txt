@@ -1,0 +1,4 @@
+# Runtime deps for ai_phone.py / AiPhone.exe (no torch / MMS / phrase generators)
+google-genai>=1.0.0
+python-dotenv>=1.0.0
+truststore>=0.10.0
