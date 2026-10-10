@@ -1,0 +1,16 @@
+{
+  "name": "telefon-ai-phone",
+  "private": true,
+  "description": "PM2 runner for the SIP + Gemini AI desk phone",
+  "scripts": {
+    "start": "echo Starting AI phone with PM2... && npx pm2 start ecosystem.config.cjs --update-env",
+    "stop": "echo Stopping AI phone... && npx pm2 stop ai-phone",
+    "restart": "echo Restarting AI phone... && npx pm2 restart ai-phone --update-env",
+    "logs": "npx pm2 logs ai-phone",
+    "status": "npx pm2 status",
+    "delete": "echo Removing AI phone from PM2... && npx pm2 delete ai-phone"
+  },
+  "devDependencies": {
+    "pm2": "^6.0.14"
+  }
+}
