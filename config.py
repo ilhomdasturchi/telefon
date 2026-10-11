@@ -99,6 +99,15 @@ CALL_API_PORT = int((os.environ.get("CALL_API_PORT") or "8088").strip() or "8088
 CALL_API_KEY = (os.environ.get("CALL_API_KEY") or "").strip()
 CALL_API_RING_SEC = float((os.environ.get("CALL_API_RING_SEC") or "2").strip() or "2")
 
+# Namozga prayer times (ibodat.marvar.id) — today + tomorrow for Gemini tool
+NAMOZGA_BASE_URL = (
+    os.environ.get("NAMOZGA_BASE_URL") or "https://ibodat.marvar.id"
+).strip().rstrip("/")
+NAMOZGA_API_KEY = (os.environ.get("NAMOZGA_API_KEY") or "").strip()
+NAMOZGA_DEFAULT_REGION = (
+    os.environ.get("NAMOZGA_DEFAULT_REGION") or "Toshkent"
+).strip() or "Toshkent"
+
 # Gemini Live (non-secret default; key comes from .env)
 GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.8-live")
 # Google Search grounding (separate free-tier quota — causes Live 1011 when exhausted)
@@ -124,6 +133,8 @@ GEMINI_SYSTEM_INSTRUCTION = (
     "Answer ASAP, but if you need to think, say 'Hozir, bilib kelaman'. "
     "For dollar/kurs/valyuta use get_exchange_rate tool (Markaziy bank). "
     "For weather/ob-havo use get_weather tool. "
+    "For namoz/prayer times (bomdod, peshin, asr, shom, xufton) use get_prayer_times tool — "
+    "it returns only today and tomorrow for a Uzbekistan city. "
     "Silence / idle prompts are sent by the phone system as text instructions — follow them exactly when you receive them. "
     # Farewell phrase is chosen in code per call and appended (see pick_random_farewell).
 )

@@ -262,6 +262,23 @@ class GeminiLiveSession:
                     },
                 ),
                 types.FunctionDeclaration(
+                    name="get_prayer_times",
+                    description=(
+                        "Get Islamic prayer (namoz) times for today and tomorrow only "
+                        "for a Uzbekistan city (Namozga / ibodat.marvar.id). "
+                        "Use when user asks namoz vaqti, bomdod, peshin, asr, shom, xufton."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "region": {
+                                "type": "string",
+                                "description": "City name, e.g. Toshkent, Samarqand, Andijon",
+                            }
+                        },
+                    },
+                ),
+                types.FunctionDeclaration(
                     name="hang_up",
                     description=(
                         "End the phone call after you have said a short farewell. "
@@ -393,7 +410,7 @@ class GeminiLiveSession:
                     "status": "hanging_up",
                     "instruction": "Stay silent. Do not speak again.",
                 }
-            elif name in {"get_exchange_rate", "get_weather"}:
+            elif name in {"get_exchange_rate", "get_weather", "get_prayer_times"}:
                 runner = getattr(self, "_run_free_tool", None)
                 if runner is None:
                     from free_facts import run_tool as runner

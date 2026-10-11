@@ -16,6 +16,7 @@ a = Analysis(
         "free_facts",
         "critical_alerts",
         "call_api",
+        "prayer_times",
         "edge_tts",
         "imageio_ffmpeg",
     ],

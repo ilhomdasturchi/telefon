@@ -91,10 +91,21 @@ def get_weather(city: str = "Toshkent") -> dict[str, Any]:
         return {"ok": False, "error": str(exc), "city": city}
 
 
+def get_prayer_times(region: str = "Toshkent") -> dict[str, Any]:
+    """Today + tomorrow namoz times via Namozga (ibodat.marvar.id)."""
+    from prayer_times import get_prayer_times as _get
+
+    return _get(region)
+
+
 def run_tool(name: str, args: dict | None) -> dict[str, Any]:
     args = args or {}
     if name == "get_exchange_rate":
         return get_exchange_rate(str(args.get("currency") or "USD"))
     if name == "get_weather":
         return get_weather(str(args.get("city") or "Toshkent"))
+    if name == "get_prayer_times":
+        return get_prayer_times(
+            str(args.get("region") or args.get("city") or "Toshkent")
+        )
     return {"ok": False, "error": f"unknown tool {name}"}
