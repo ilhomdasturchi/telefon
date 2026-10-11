@@ -1,11 +1,11 @@
 """
 Generate pre-recorded call phrase WAVs.
 
-Tries Gemini TTS models in order; on rate-limit / failure, falls back:
-  1. gemini-3.1-flash-tts-preview
-  2. gemini-2.5-flash-preview-tts
-  3. gemini-3.8-flash-lite-tts
-  4. edge (Microsoft, free)
+TTS fallback chain:
+  1. edge (Microsoft Edge Read Aloud, free)
+  2. gemini-3.1-flash-tts-preview
+  3. gemini-2.5-flash-preview-tts
+  4. gemini-3.8-flash-lite-tts
   5. mms (local Uzbek)
 
   python generate_phrases.py
@@ -139,11 +139,10 @@ def synthesize_with_fallback(
     preferred_engine: str | None,
 ) -> tuple[bytes, str]:
     """Return (wav_bytes, engine_label). Updates preferred_engine via list trick."""
-    engines: list[str] = []
-    # Gemini models first
+    engines: list[str] = ["edge"]
     for m in _gemini_model_list():
         engines.append(f"gemini:{m}")
-    engines.extend(["edge", "mms"])
+    engines.append("mms")
 
     # Rotate so we keep using the last successful non-rate-limited engine
     if preferred_engine and preferred_engine in engines:
@@ -211,13 +210,13 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print("phrase TTS fallback chain:")
+    print("  - edge")
     for m in _gemini_model_list():
         print(f"  - gemini:{m}")
-    print("  - edge")
     print("  - mms")
     print(f"out={out_dir}")
 
-    preferred: str | None = f"gemini:{_gemini_model_list()[0]}"
+    preferred: str | None = "edge"
 
     for group, item in _all_phrases():
         out = out_dir / f"{item['id']}.wav"

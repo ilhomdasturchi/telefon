@@ -37,6 +37,8 @@ truststore.inject_into_ssl()
 
 import config
 from autostart import ensure_autostart, remove_autostart
+from call_api import CallApiServer
+from critical_alerts import CriticalAlertPoller, announce_alerts_on_phone
 from gemini_live import GeminiLiveSession
 from greeting import pick_random_phrase, play_random_greeting, play_wav
 from rtp_bridge import RtpBridge
@@ -434,7 +436,12 @@ def main() -> int:
         default=os.environ.get("BIND_IP", config.BIND_IP).strip() or config.BIND_IP,
         help="SIP bind IP (0.0.0.0 = all interfaces); or set BIND_IP in .env",
     )
-    parser.add_argument("--port", type=int, default=config.SIP_PORT)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=int((os.environ.get("SIP_PORT") or str(config.SIP_PORT)).strip() or config.SIP_PORT),
+        help="SIP UDP port; or set SIP_PORT in .env",
+    )
     parser.add_argument("--ext", default=config.PHONE_EXTENSION)
     parser.add_argument(
         "--timeout",
@@ -497,29 +504,84 @@ def main() -> int:
     print("Waiting for desk phone REGISTER...")
     print(f"  SIP server : {args.bind}:{args.port}")
     print(f"  phone ext  : {args.ext}  (password {config.ACCOUNTS[args.ext]})")
-    print(f"  AI ext     : {config.AI_EXTENSION}  ← dial this to talk")
+    print(f"  AI ext     : {config.AI_EXTENSION}  <- dial this to talk")
     print(f"  Gemini     : {args.model}")
     print()
     print("Hot Line tip (KX-HDV130): set Hot Line number to 100")
     print("so lifting the handset calls the AI. Or dial 100 after pickup.")
     print()
 
-    if not pbx.wait_for_register(args.ext, timeout=args.timeout):
-        print("Timed out waiting for REGISTER. Is the phone pointed at this PC?")
-        print(f"Phone SIP user/pass should be {args.ext}/{config.ACCOUNTS[args.ext]}")
-        pbx.stop()
-        return 2
-
-    print(f"Phone {args.ext} registered. Dial {config.AI_EXTENSION} for AI.")
+    # Never exit for missing REGISTER — SIP stays up until Ctrl+C / process stop.
+    print(
+        f"Waiting for REGISTER from {args.ext} on {pbx.advertise_ip}:{args.port} "
+        f"(keeps listening forever).",
+        flush=True,
+    )
+    print(f"Phone SIP user/pass should be {args.ext}/{config.ACCOUNTS[args.ext]}")
     print("Ctrl+C to stop.")
     print()
 
+    def _announce(alerts):
+        return announce_alerts_on_phone(
+            pbx,
+            bind_ip=args.bind,
+            extension=args.ext,
+            alerts=alerts,
+        )
+
+    critical_poller: CriticalAlertPoller | None = None
+    vazifa_key = (
+        os.environ.get("VAZIFA_CRITICAL_KEY") or config.VAZIFA_CRITICAL_KEY or ""
+    ).strip()
+    vazifa_base = (
+        os.environ.get("VAZIFA_BASE_URL") or config.VAZIFA_BASE_URL or "https://vazifa.telepat.uz"
+    ).strip().rstrip("/")
+    if vazifa_key:
+        critical_poller = CriticalAlertPoller(
+            base_url=vazifa_base,
+            key=vazifa_key,
+            announce=_announce,
+            default_interval=float(
+                os.environ.get("VAZIFA_CRITICAL_POLL_SEC")
+                or getattr(config, "VAZIFA_CRITICAL_POLL_SEC", 10)
+                or 10
+            ),
+        )
+        critical_poller.start()
+    else:
+        print(
+            "[critical] disabled — set VAZIFA_CRITICAL_KEY in .env to enable Vazifa alerts",
+            flush=True,
+        )
+
+    call_api = CallApiServer(
+        pbx=pbx,
+        bind_ip=args.bind,
+        extension=args.ext,
+        announce=_announce,
+    )
+    call_api.start()
+
     try:
+        registered_note = args.ext in pbx.registrations
         while True:
             time.sleep(1)
+            now_reg = args.ext in pbx.registrations
+            if now_reg and not registered_note:
+                print(
+                    f"Phone {args.ext} registered. Dial {config.AI_EXTENSION} for AI.",
+                    flush=True,
+                )
+                registered_note = True
+            elif not now_reg and registered_note:
+                print(f"Phone {args.ext} unregistered — waiting again...", flush=True)
+                registered_note = False
     except KeyboardInterrupt:
         print()
     finally:
+        call_api.stop()
+        if critical_poller:
+            critical_poller.stop()
         controller.on_ended()
         pbx.stop()
         print("bye")

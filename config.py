@@ -55,13 +55,49 @@ def resolve_advertise_ip(bind_ip: str | None = None, peer_ip: str | None = None)
 # RTP port range used when this PBX places a call
 RTP_PORT = 10000
 
-# Local extensions 100–999 (password = extension number)
-ACCOUNTS = {str(n): str(n) for n in range(100, 1000)}
+# Local extensions (password = extension number). Default 100–110 inclusive.
+SIP_EXT_MIN = int((os.environ.get("SIP_EXT_MIN") or "100").strip() or "100")
+SIP_EXT_MAX = int((os.environ.get("SIP_EXT_MAX") or "110").strip() or "110")
+if SIP_EXT_MAX < SIP_EXT_MIN:
+    SIP_EXT_MIN, SIP_EXT_MAX = SIP_EXT_MAX, SIP_EXT_MIN
+ACCOUNTS = {str(n): str(n) for n in range(SIP_EXT_MIN, SIP_EXT_MAX + 1)}
 
 # Special numbers
 AI_EXTENSION = "100"  # dial this to talk to Gemini
 PHONE_EXTENSION = "101"  # desk phone (Panasonic)
 PHONE_IP = "192.168.1.190"
+# Outbound Caller ID shown on the desk phone (From display name + sip user)
+SIP_CALLER_ID = (os.environ.get("SIP_CALLER_ID") or "AiPhone").strip() or "AiPhone"
+SIP_CALLER_USER = (os.environ.get("SIP_CALLER_USER") or "100").strip() or "100"
+
+# Vazifa critical-alert poller (Hisob → API xabarlar → Telefon / Critical)
+# Auth is key-only; the key scopes which user's alerts are returned.
+VAZIFA_BASE_URL = (os.environ.get("VAZIFA_BASE_URL") or "https://vazifa.telepat.uz").strip().rstrip("/")
+VAZIFA_CRITICAL_KEY = (os.environ.get("VAZIFA_CRITICAL_KEY") or "").strip()
+VAZIFA_CRITICAL_POLL_SEC = float((os.environ.get("VAZIFA_CRITICAL_POLL_SEC") or "10").strip() or "10")
+VAZIFA_CRITICAL_ENABLED = bool(VAZIFA_CRITICAL_KEY)
+# Outbound critical call behavior
+CRITICAL_RING_SEC = float((os.environ.get("CRITICAL_RING_SEC") or "15").strip() or "15")
+CRITICAL_RETRY_GAP_SEC = float((os.environ.get("CRITICAL_RETRY_GAP_SEC") or "60").strip() or "60")
+CRITICAL_MAX_ATTEMPTS = int((os.environ.get("CRITICAL_MAX_ATTEMPTS") or "5").strip() or "5")
+CRITICAL_REPEAT_COUNT = int((os.environ.get("CRITICAL_REPEAT_COUNT") or "2").strip() or "2")
+CRITICAL_REPEAT_BRIDGE = (os.environ.get("CRITICAL_REPEAT_BRIDGE") or "qaytaraman").strip() or "qaytaraman"
+# Prerecorded bridge clip played between the two message plays (no second TTS).
+CRITICAL_BRIDGE_WAV = os.environ.get(
+    "CRITICAL_BRIDGE_WAV",
+    os.path.join(_RESOURCE_DIR, "assets", "critical", "qaytaraman.wav"),
+)
+# Message TTS (Edge) — slower than greetings so Uzbek is clearer
+CRITICAL_TTS_RATE = (os.environ.get("CRITICAL_TTS_RATE") or "-20%").strip() or "-20%"
+CRITICAL_TTS_PITCH = (os.environ.get("CRITICAL_TTS_PITCH") or "-2Hz").strip() or "-2Hz"
+# Silence before first message so phone RTP doesn't clip the opening words
+CRITICAL_LEAD_SILENCE_MS = int((os.environ.get("CRITICAL_LEAD_SILENCE_MS") or "600").strip() or "600")
+
+# Local HTTP call API (POST /api/call) — disabled until CALL_API_KEY is set
+CALL_API_HOST = (os.environ.get("CALL_API_HOST") or "0.0.0.0").strip() or "0.0.0.0"
+CALL_API_PORT = int((os.environ.get("CALL_API_PORT") or "8088").strip() or "8088")
+CALL_API_KEY = (os.environ.get("CALL_API_KEY") or "").strip()
+CALL_API_RING_SEC = float((os.environ.get("CALL_API_RING_SEC") or "2").strip() or "2")
 
 # Gemini Live (non-secret default; key comes from .env)
 GEMINI_LIVE_MODEL = os.environ.get("GEMINI_LIVE_MODEL", "gemini-3.8-live")
@@ -73,14 +109,14 @@ GEMINI_LIVE_GOOGLE_SEARCH = os.environ.get("GEMINI_LIVE_GOOGLE_SEARCH", "0").str
     "on",
 }
 # Ring before AI answers (phone plays local ringback on 180 Ringing)
-AI_RING_SECONDS = 1.5
+AI_RING_SECONDS = 0.5
 # Phone mic → Gemini (narrowband RTP is quiet; slight boost helps ASR)
 MIC_GAIN = float((os.environ.get("MIC_GAIN") or "2.2").strip() or "2.2")
 GEMINI_SYSTEM_INSTRUCTION = (
-    "This AI name is Alomat, 22 years old girl lives in internet"
+    "Everytime speak Uzbek language without accent"
+    "This AI name is Alomat, a girl lives in internet"
     "If asks about creator (even of this AI) Say 'Bizni Allah yaratgan'"
     "If asks about developer say 'Mani Ilhom aka dasturchi yasaganlar'"
-    "Everytime speak Uzbek language. "
     "Foydalanuvchi o'zbekcha gapiradi; telefon audiosi noaniq bo'lsa ham tushunishga harakat qil. "
     "Even if user input doesn't sound like Uzbek, try to understand and respond in Uzbek. "
     "Answer short and sweet. "
@@ -88,7 +124,6 @@ GEMINI_SYSTEM_INSTRUCTION = (
     "Answer ASAP, but if you need to think, say 'Hozir, bilib kelaman'. "
     "For dollar/kurs/valyuta use get_exchange_rate tool (Markaziy bank). "
     "For weather/ob-havo use get_weather tool. "
-    "Do not invent live numbers. For other internet facts you cannot look up, say so briefly. "
     "Silence / idle prompts are sent by the phone system as text instructions — follow them exactly when you receive them. "
     # Farewell phrase is chosen in code per call and appended (see pick_random_farewell).
 )
@@ -156,8 +191,7 @@ IDLE_FAREWELL_PHRASES = (
         "style": f"{_PHRASE_CALM} Casual goodbye with callback invite.",
     },
 )
-# Phrase TTS: try this Gemini model first; generate_phrases.py falls back on 429
-# → 3.1 / 2.5 / 3.8-lite → edge → local mms
+# Phrase TTS: Edge first; on failure try this Gemini model then other Gemini → mms
 PHRASE_TTS_MODEL = os.environ.get("PHRASE_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 
 PHRASE_TTS_VOICE = os.environ.get("PHRASE_TTS_VOICE", "Kore")
@@ -177,11 +211,12 @@ HANGUP_PHRASES = (
 )
 
 # Instant pre-recorded greetings — one played at random on answer
-# Calm, natural phone tone — not overly cheerful
+# Serious-positive phone tone — composed, not joyful
 _CALM = (
-    "Calm natural adult phone voice. Neutral-positive, understated. "
-    "NOT cheerful, NOT excited, NOT smiling hard, NOT cartoonish. "
-    "Like a polite receptionist answering a call."
+    "Serious, composed adult phone voice. Warm but reserved and professional. "
+    "Slightly positive, never cold. "
+    "NOT cheerful, NOT joyful, NOT playful, NOT excited, NOT smiling, NOT cartoonish. "
+    "Like a calm office receptionist — attentive and polite."
 )
 
 GREETING_DIR = os.path.join(_RESOURCE_DIR, "assets", "greetings")
@@ -189,11 +224,11 @@ GREETINGS = [
     {
         "id": "labbay",
         "label": "Labbay",
-        "speak": "Labbe",
+        "speak": "Лаббэ Хўжайин",
         "style": (
             f"{_CALM} "
-            "Pronounce exactly as two syllables Lab-be (Labbe), not Lab-bay. "
-            "Steady, ready, brief."
+            "Uzbek Cyrillic: Лаббэ Хўжайин — respectful ready reply. "
+            "Brief, steady, serious phone pickup."
         ),
         "lock": False,
     },
@@ -203,8 +238,8 @@ GREETINGS = [
         "speak": "Eshitaman?",
         "style": (
             f"{_CALM} "
-            "Mild rising question intonation ('I'm listening?'). "
-            "Soft and natural, not bright or bubbly."
+            "Mild rising question ('I'm listening?'). "
+            "Quiet, serious, no brightness or bounce."
         ),
         "lock": False,
     },
@@ -225,8 +260,9 @@ GREETINGS = [
         "speak": "Yaxshimisiz?",
         "style": (
             f"{_CALM} "
-            "Mild rising question intonation ('How are you?'). "
-            "Polite, soft, not energetic."
+            "Same pronunciation as before: Yax-shi-mi-siz "
+            "(x as Uzbek soft kh/h, not English 'ks'). "
+            "End with a clear mild question rise — polite question, not a statement."
         ),
         "lock": False,
     },
@@ -246,8 +282,8 @@ GREETINGS = [
         "speak": "Nima xizmat?",
         "style": (
             f"{_CALM} "
-            "Mild rising question intonation ('How can I help?'). "
-            "Matter-of-fact and polite."
+            "Pronounce as Ni-ma xiz-mat? with a mild question rise. "
+            "Clear Uzbek: xizmat not 'service'. Matter-of-fact, serious — not bright."
         ),
         "lock": False,
     },

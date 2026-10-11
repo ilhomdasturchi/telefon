@@ -727,7 +727,14 @@ class SipPbx:
         self._fire_call_ended()
         return True
 
-    def dial(self, extension: str, ring_seconds: float = 60.0, auto_hangup_after_tone: float = 0.0) -> bool:
+    def dial(
+        self,
+        extension: str,
+        ring_seconds: float = 60.0,
+        auto_hangup_after_tone: float = 0.0,
+        *,
+        connect_tone: bool = True,
+    ) -> bool:
         """Place an outbound call. Keeps the call open unless auto_hangup_after_tone > 0."""
         if self.call:
             self._emit("[call] already in a call — hangup first")
@@ -745,7 +752,11 @@ class SipPbx:
         cseq_num = 1
         cseq = f"{cseq_num} INVITE"
         request_uri = f"sip:{extension}@{reg.endpoint[0]}:{reg.endpoint[1]}"
-        from_header = f"{_quote('PBX')} <sip:pbx@{self.advertise_ip}>;tag={from_tag}"
+        caller_name = (getattr(config, "SIP_CALLER_ID", None) or "AiPhone").strip() or "AiPhone"
+        caller_user = (getattr(config, "SIP_CALLER_USER", None) or "100").strip() or "100"
+        from_header = (
+            f"{_quote(caller_name)} <sip:{caller_user}@{self.advertise_ip}>;tag={from_tag}"
+        )
         to_header = f"{_quote(extension)} <sip:{extension}@{self.advertise_ip}>"
         sdp = self._local_sdp(local_rtp)
 
@@ -772,7 +783,7 @@ class SipPbx:
                 f"To: {to_header}",
                 f"Call-ID: {call_id}",
                 f"CSeq: {cseq}",
-                f"Contact: <sip:pbx@{self.advertise_ip}:{self.sip_port}>",
+                f"Contact: <sip:{caller_user}@{self.advertise_ip}:{self.sip_port}>",
                 "User-Agent: telefon-pbx/1.0",
                 "Allow: INVITE, ACK, CANCEL, BYE, OPTIONS, REGISTER",
                 "Content-Type: application/sdp",
@@ -819,7 +830,7 @@ class SipPbx:
                 f"To: {self.call.to_header}",
                 f"Call-ID: {call_id}",
                 f"CSeq: {cseq_num} ACK",
-                f"Contact: <sip:pbx@{self.advertise_ip}:{self.sip_port}>",
+                f"Contact: <sip:{caller_user}@{self.advertise_ip}:{self.sip_port}>",
                 "Content-Length: 0",
                 "",
                 "",
@@ -838,7 +849,7 @@ class SipPbx:
                     seconds=auto_hangup_after_tone,
                 )
                 self.hangup()
-            else:
+            elif connect_tone:
                 self._start_tone(self.call.remote_rtp, bind_port=local_rtp, seconds=1.5)
         return True
 

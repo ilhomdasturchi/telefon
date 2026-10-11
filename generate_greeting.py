@@ -219,7 +219,22 @@ async def synthesize_edge(speak: str, voice: str, rate: str, pitch: str) -> byte
     return mp3_to_wav_pcm24k(bytes(mp3))
 
 
-def synthesize_gemini(speak: str, style: str) -> bytes:
+_GEMINI_TTS_MODELS = (
+    "gemini-3.1-flash-tts-preview",
+    "gemini-2.5-flash-preview-tts",
+    "gemini-3.8-flash-lite-tts",
+    "gemini-3.8-flash-tts",
+)
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    msg = str(exc)
+    return "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower()
+
+
+def synthesize_gemini(speak: str, style: str, model: str | None = None) -> bytes:
+    import base64
+
     import truststore
 
     truststore.inject_into_ssl()
@@ -232,32 +247,47 @@ def synthesize_gemini(speak: str, style: str) -> bytes:
     if not api_key:
         raise RuntimeError("Missing GEMINI_API_KEY in .env")
 
+    model = model or config.GREETING_TTS_MODEL
+    voice = config.GREETING_VOICE
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=config.GREETING_TTS_MODEL,
-        contents=[
-            {
-                "role": "user",
-                "parts": [{"text": speak, "speech_metadata": {"style": style}}],
-            }
-        ],
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=config.GREETING_VOICE,
-                    )
-                )
-            ),
+    speech_cfg = types.GenerateContentConfig(
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice)
+            )
         ),
     )
-    part = response.candidates[0].content.parts[0]
-    data = part.inline_data.data
-    mime = part.inline_data.mime_type or ""
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=[
+                {
+                    "role": "user",
+                    "parts": [{"text": speak, "speech_metadata": {"style": style}}],
+                }
+            ],
+            config=speech_cfg,
+        )
+    except Exception as exc:
+        # gemini-3.1-flash-tts-preview rejects speech_metadata
+        if "Speech metadata" not in str(exc) and "speech_metadata" not in str(exc).lower():
+            raise
+        response = client.models.generate_content(
+            model=model,
+            contents=speak,
+            config=speech_cfg,
+        )
+    cand = response.candidates
+    if not cand or not cand[0].content or not cand[0].content.parts:
+        raise RuntimeError(f"{model} returned empty audio")
+    part = cand[0].content.parts[0]
+    inline = part.inline_data
+    if not inline or not inline.data:
+        raise RuntimeError(f"{model} returned no inline audio")
+    data = inline.data
+    mime = inline.mime_type or ""
     if isinstance(data, str):
-        import base64
-
         data = base64.b64decode(data)
     if mime.startswith("audio/wav") or (len(data) >= 4 and data[:4] == b"RIFF"):
         return data
@@ -271,6 +301,61 @@ def synthesize_gemini(speak: str, style: str) -> bytes:
     return buf.getvalue()
 
 
+def _edge_speak_latin(speak: str) -> str:
+    """Edge Uzbek voices need Latin script for Cyrillic prompts."""
+    if not any("\u0400" <= ch <= "\u04FF" for ch in speak):
+        return speak
+    return (
+        speak.replace("Лаббэ Хўжайин", "Labbe xo'jayin")
+        .replace("Лаб-Бай?", "Lab-Bay?")
+        .replace("Лаб-Бей?", "Lab-Bey?")
+        .replace("Лаб-бэй", "Lab-bey")
+        .replace("Лаб-Бай", "Lab-Bay")
+        .replace("Лаб-Бей", "Lab-Bey")
+    )
+
+
+def synthesize_tts_cascade(speak: str, style: str) -> tuple[bytes, str]:
+    """Primary: Edge TTS. Secondary: Google Gemini TTS models."""
+    last_err: BaseException | None = None
+
+    voice = getattr(config, "EDGE_TTS_VOICE", "uz-UZ-MadinaNeural")
+    rate = getattr(config, "EDGE_TTS_RATE", "-5%")
+    pitch = getattr(config, "EDGE_TTS_PITCH", "-2Hz")
+    edge_speak = _edge_speak_latin(speak)
+    try:
+        print(f"     try edge-tts speak={edge_speak!r} ...", flush=True)
+        return asyncio.run(synthesize_edge(edge_speak, voice, rate, pitch)), "edge"
+    except Exception as exc:  # noqa: BLE001
+        last_err = exc
+        print(f"     edge failed: {exc}", flush=True)
+
+    models: list[str] = []
+    primary = getattr(config, "GREETING_TTS_MODEL", None)
+    for m in _GEMINI_TTS_MODELS:
+        if m not in models:
+            models.append(m)
+    if primary and primary not in models:
+        models.insert(0, primary)
+
+    for model in models:
+        try:
+            print(f"     try gemini:{model} ...", flush=True)
+            return synthesize_gemini(speak, style, model=model), f"gemini:{model}"
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            if _is_rate_limited(exc):
+                print(f"     rate-limited on {model}, next...", flush=True)
+                continue
+            print(f"     {model} failed: {exc}", flush=True)
+            continue
+
+    raise RuntimeError(f"all TTS engines failed; last error: {last_err}")
+
+
+# Back-compat alias (old name implied Gemini-first)
+synthesize_gemini_cascade = synthesize_tts_cascade
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -280,13 +365,20 @@ def main() -> int:
     )
     parser.add_argument(
         "--engine",
-        choices=("mms", "edge", "gemini"),
+        choices=("mms", "edge", "gemini", "auto"),
         default=os.environ.get(
             "GREETING_TTS_ENGINE", getattr(config, "GREETING_TTS_ENGINE", "edge")
         ),
-        help="TTS backend (default: edge; mms needs optional torch)",
+        help="TTS backend (auto = Edge then Gemini models)",
+    )
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        metavar="ID",
+        help="only regenerate these greeting ids (e.g. labbay eshitaman)",
     )
     args = parser.parse_args()
+    only = {x.strip() for x in (args.only or []) if x.strip()}
 
     try:
         import truststore
@@ -305,8 +397,8 @@ def main() -> int:
     print(f"engine={args.engine}")
     if args.engine == "edge":
         print(f"voice={voice} rate={rate} pitch={pitch}")
-    elif args.engine == "gemini":
-        print(f"model={config.GREETING_TTS_MODEL} voice={config.GREETING_VOICE}")
+    elif args.engine in ("gemini", "auto"):
+        print(f"models={', '.join(_GEMINI_TTS_MODELS)} voice={config.GREETING_VOICE}")
     else:
         print(
             f"model={getattr(config, 'MMS_TTS_MODEL', 'MuzaffarSharofitdinov/mms-tts-uzbek-girl-voice_cyrillic')}"
@@ -314,42 +406,43 @@ def main() -> int:
 
     for item in config.GREETINGS:
         out = out_dir / f"{item['id']}.wav"
+        if only and item["id"] not in only:
+            continue
         if item.get("lock"):
             print(f"  lock  {item['label']!r} ({out.name}) — kept")
             continue
-        if out.is_file() and out.stat().st_size > 1000 and not args.force:
+        if out.is_file() and out.stat().st_size > 1000 and not args.force and not only:
             print(f"  skip  {item['label']!r} (exists; use --force)")
             continue
 
         print(f"  -> {item['label']!r}  speak={item['speak']!r}")
-        for attempt in range(1, 6):
-            try:
-                if args.engine == "mms":
-                    wav = synthesize_mms(item["speak"])
-                elif args.engine == "edge":
-                    wav = asyncio.run(synthesize_edge(item["speak"], voice, rate, pitch))
-                else:
+        try:
+            if args.engine == "mms":
+                wav = synthesize_mms(item["speak"])
+                used = "mms"
+            elif args.engine == "edge":
+                wav = asyncio.run(synthesize_edge(item["speak"], voice, rate, pitch))
+                used = "edge"
+            elif args.engine == "auto":
+                wav, used = synthesize_gemini_cascade(item["speak"], item["style"])
+            else:
+                # Single primary model; on 429 fall through cascade
+                try:
                     wav = synthesize_gemini(item["speak"], item["style"])
-                out.write_bytes(wav)
-                print(f"     wrote {out.stat().st_size} bytes")
-                break
-            except Exception as exc:  # noqa: BLE001
-                msg = str(exc)
-                if args.engine == "gemini" and ("429" in msg or "RESOURCE_EXHAUSTED" in msg):
-                    wait = 45 * attempt
-                    print(f"     rate limited, wait {wait}s (attempt {attempt}/5)...")
-                    time.sleep(wait)
-                    continue
-                print(f"     error: {exc}")
-                if attempt >= 5:
-                    return 1
-                time.sleep(2)
-        else:
-            print(f"     FAILED {item['label']!r}")
+                    used = f"gemini:{config.GREETING_TTS_MODEL}"
+                except Exception as exc:
+                    if not _is_rate_limited(exc):
+                        raise
+                    print(f"     rate-limited on primary, cascading...", flush=True)
+                    wav, used = synthesize_gemini_cascade(item["speak"], item["style"])
+            out.write_bytes(wav)
+            print(f"     wrote {out.stat().st_size} bytes via {used}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"     FAILED {item['label']!r}: {exc}", flush=True)
             return 1
 
-        if args.engine == "gemini":
-            time.sleep(25)
+        if args.engine in ("gemini", "auto") or str(used).startswith("gemini"):
+            time.sleep(8)
 
     print("Done.")
     return 0
