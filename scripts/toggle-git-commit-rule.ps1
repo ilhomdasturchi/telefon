@@ -1,9 +1,15 @@
 # Toggle short Git-commit Cursor rule on/off (one click).
 # Enabled  = .cursor/rules/git-commit-message.mdc + marked block in .cursorrules
 # Disabled = both removed
+# Optional: -Root C:\path\to\project (defaults to this repo)
+param(
+    [string]$Root = ""
+)
 
 $ErrorActionPreference = "Stop"
-$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+if (-not $Root) {
+    $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+}
 Set-Location $Root
 
 $RuleDir = Join-Path $Root ".cursor\rules"

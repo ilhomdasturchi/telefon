@@ -1,0 +1,105 @@
+{
+  "name": "telefon",
+  "displayName": "Telefon",
+  "description": "Phone button that announces or rings through the local call API.",
+  "version": "0.5.0",
+  "publisher": "personal",
+  "private": true,
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:telefon.call"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "telefon.show",
+        "title": "Telefon",
+        "icon": "$(call-outgoing)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "telefon",
+          "title": "Telefon",
+          "icon": "media/phone.svg"
+        }
+      ]
+    },
+    "views": {
+      "telefon": [
+        {
+          "type": "webview",
+          "id": "telefon.call",
+          "name": "Telefon"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Telefon",
+      "properties": {
+        "telefon.url": {
+          "type": "string",
+          "default": "http://192.168.1.200:5090/api/call",
+          "description": "Call API endpoint."
+        },
+        "telefon.apiKey": {
+          "type": "string",
+          "default": "telefon-call-change-me",
+          "description": "Value sent in the X-Call-Key header."
+        },
+        "telefon.defaultMessage": {
+          "type": "string",
+          "default": "Salom",
+          "description": "Message used by Speak."
+        },
+        "telefon.ringSeconds": {
+          "type": "number",
+          "default": 2,
+          "description": "How long Ring lasts."
+        },
+        "telefon.idleSeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "After a task ends, wait this many seconds of not being busy in Cursor before calling. Busy = Cursor focused and recently used (keyboard/mouse). Activity outside Cursor does not suppress the call."
+        },
+        "telefon.notifyMode": {
+          "type": "string",
+          "enum": [
+            "ring",
+            "announce"
+          ],
+          "default": "ring",
+          "description": "How to call when a task finishes and you are not busy in Cursor."
+        },
+        "telefon.notifyMessage": {
+          "type": "string",
+          "enum": [
+            "Vazifa bajarildi",
+            "Kompyuterga qaravoring",
+            "Yuklatilgan vazifa bajarildi"
+          ],
+          "default": "Vazifa bajarildi",
+          "description": "Prepared Uzbek clip played when notify mode is announce."
+        },
+        "telefon.notifyRingSeconds": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "Ring length when notify mode is ring."
+        }
+      }
+    }
+  }
+}

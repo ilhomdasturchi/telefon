@@ -3,12 +3,15 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Src = Join-Path $Root "tools\git-commit-rule-toggle"
 $ExtRoot = Join-Path $env:USERPROFILE ".cursor\extensions"
-$Dest = Join-Path $ExtRoot "telefon.telefon-git-commit-rule-0.0.1"
+$Dest = Join-Path $ExtRoot "telefon.telefon-git-commit-rule-0.0.2"
 
 if (-not (Test-Path $Src)) {
     throw "Extension source missing: $Src"
 }
 New-Item -ItemType Directory -Force -Path $ExtRoot | Out-Null
+Get-ChildItem $ExtRoot -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "telefon.telefon-git-commit-rule-*" -and $_.FullName -ne $Dest } |
+    ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
 if (Test-Path $Dest) {
     Remove-Item -Recurse -Force $Dest
 }

@@ -2,7 +2,7 @@
   "name": "telefon-git-commit-rule",
   "displayName": "Git Commit Rule Toggle",
   "description": "Status-bar button to install/uninstall short Git commit Cursor rules",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "telefon",
   "engines": {
     "vscode": "^1.85.0"
