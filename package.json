@@ -1,8 +1,11 @@
 {
   "name": "telefon-ai-phone",
   "private": true,
-  "description": "SIP + Gemini AI desk phone",
+  "description": "SIP + Gemini AI desk phone with Neutralino shell",
   "scripts": {
-    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File build_exe.ps1"
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File build_exe.ps1",
+    "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"python -m PyInstaller --noconfirm --clean AiPhone.spec\"",
+    "desktop:run": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location desktop; neu run\"",
+    "desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location desktop; neu build --release\""
   }
 }

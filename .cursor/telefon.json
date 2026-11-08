@@ -1,8 +1,8 @@
 {
   "url": "http://192.168.1.200:5090/api/call",
   "apiKey": "telefon-call-change-me",
-  "idleSeconds": 5,
+  "idleSeconds": 6,
   "mode": "ring",
   "message": "Vazifa bajarildi",
-  "ringSeconds": 8
+  "ringSeconds": 4
 }

@@ -3,14 +3,14 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Src = Join-Path $Root "tools\telefon"
 $ExtRoot = Join-Path $env:USERPROFILE ".cursor\extensions"
-$Dest = Join-Path $ExtRoot "personal.telefon-0.5.0"
+$Dest = Join-Path $ExtRoot "personal.telefon-0.5.1"
 
 if (-not (Test-Path $Src)) {
     throw "Extension source missing: $Src"
 }
 New-Item -ItemType Directory -Force -Path $ExtRoot | Out-Null
 
-# Remove older copies so Cursor loads 0.5.0
+# Remove older copies so Cursor loads the new version
 Get-ChildItem $ExtRoot -Directory -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -like "personal.telefon-*" -and $_.FullName -ne $Dest } |
     ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
@@ -28,3 +28,4 @@ Write-Host ""
 Write-Host "After a task: calls only if you are NOT busy in Cursor."
 Write-Host "  Inside Cursor + doing something  -> no call"
 Write-Host "  Inside Cursor + idle / outside Cursor -> call after idle seconds"
+Write-Host "Decisions are logged in: View -> Output -> Telefon"

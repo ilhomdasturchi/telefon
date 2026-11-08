@@ -7,5 +7,9 @@ node_modules/
 .pm2/
 build/
 dist/
+logs/
+desktop/bin/
+desktop/.tmp/
+desktop/dist/
 *.spec.bak
 

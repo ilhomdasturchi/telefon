@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Telefon</title>
+  <link rel="stylesheet" href="/styles/app.css" />
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Telefon</h1>
+      <p class="sub">AiPhone control shell</p>
+    </div>
+    <div class="top-actions">
+      <span id="backendBadge" class="badge badge-off">Backend off</span>
+      <button type="button" id="btnEnable" class="btn primary">Enable</button>
+      <button type="button" id="btnDisable" class="btn">Disable</button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <h2>Status</h2>
+      <dl class="kv" id="statusKv">
+        <div><dt>SIP bind</dt><dd id="stBind">—</dd></div>
+        <div><dt>Advertise IP</dt><dd id="stAdvertise">—</dd></div>
+        <div><dt>SIP port</dt><dd id="stSipPort">—</dd></div>
+        <div><dt>Phone</dt><dd id="stPhone">—</dd></div>
+        <div><dt>Call API</dt><dd id="stCallApi">—</dd></div>
+        <div><dt>Update</dt><dd id="stUpdate">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="panel">
+      <h2>IP settings</h2>
+      <label class="field">
+        <span>BIND_IP</span>
+        <input id="inpBind" type="text" spellcheck="false" placeholder="0.0.0.0" />
+      </label>
+      <label class="field">
+        <span>SIP_ADVERTISE_IP</span>
+        <input id="inpAdvertise" type="text" spellcheck="false" placeholder="192.168.1.200" />
+      </label>
+      <label class="field">
+        <span>SIP_PORT</span>
+        <input id="inpSipPort" type="number" min="1" max="65535" placeholder="5060" />
+      </label>
+      <div class="row">
+        <button type="button" id="btnSaveIp" class="btn primary">Save &amp; restart backend</button>
+        <button type="button" id="btnReloadIp" class="btn">Reload from .env</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Autostart &amp; update</h2>
+      <label class="check">
+        <input id="chkAutostart" type="checkbox" />
+        <span>Start Telefon at Windows login</span>
+      </label>
+      <label class="field">
+        <span>Update URL</span>
+        <input id="inpUpdateUrl" type="url" spellcheck="false" />
+      </label>
+      <div class="row">
+        <button type="button" id="btnCheckUpdate" class="btn primary">Check for updates</button>
+        <button type="button" id="btnSaveUpdateUrl" class="btn">Save URL</button>
+      </div>
+      <p id="updateMsg" class="hint"></p>
+    </section>
+
+    <section class="panel panel-logs">
+      <div class="row between">
+        <h2>Logs</h2>
+        <div class="row">
+          <button type="button" id="btnRefreshLogs" class="btn">Refresh</button>
+          <button type="button" id="btnClearLogs" class="btn danger">Clear logs</button>
+        </div>
+      </div>
+      <pre id="logView" class="log"></pre>
+    </section>
+  </main>
+
+  <script src="/js/neutralino.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

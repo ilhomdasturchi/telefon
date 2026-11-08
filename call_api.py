@@ -112,15 +112,35 @@ class CallApiServer:
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
 
+    def _status_body(self) -> dict[str, Any]:
+        reg = self.extension in self.pbx.registrations
+        advertise = getattr(self.pbx, "advertise_ip", None) or ""
+        sip_port = getattr(self.pbx, "sip_port", None)
+        return {
+            "ok": True,
+            "service": "telefon-call-api",
+            "running": True,
+            "extension": self.extension,
+            "registered": reg,
+            "busy": bool(self.pbx.call),
+            "bindIp": self.bind_ip,
+            "advertiseIp": advertise,
+            "sipPort": sip_port,
+            "callApiEnabled": bool(self.api_key),
+            "callApiHost": self.host,
+            "callApiPort": self.port,
+            "types": ["announce", "ring"],
+        }
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
         if not self.api_key:
             print(
-                "[call-api] disabled — set CALL_API_KEY in .env to enable POST /api/call",
+                "[call-api] POST /api/call disabled — set CALL_API_KEY; "
+                "GET /api/status still available",
                 flush=True,
             )
-            return
 
         outer = self
 
@@ -152,19 +172,8 @@ class CallApiServer:
 
             def do_GET(self) -> None:  # noqa: N802
                 path = urlparse(self.path).path.rstrip("/") or "/"
-                if path in ("/api/health", "/health"):
-                    reg = outer.extension in outer.pbx.registrations
-                    self._json(
-                        200,
-                        {
-                            "ok": True,
-                            "service": "telefon-call-api",
-                            "extension": outer.extension,
-                            "registered": reg,
-                            "busy": bool(outer.pbx.call),
-                            "types": ["announce", "ring"],
-                        },
-                    )
+                if path in ("/api/health", "/health", "/api/status", "/status"):
+                    self._json(200, outer._status_body())
                     return
                 self._json(404, {"ok": False, "error": "not_found"})
 
@@ -183,6 +192,17 @@ class CallApiServer:
                     return
                 if not isinstance(body, dict):
                     self._json(400, {"ok": False, "error": "invalid_json"})
+                    return
+
+                if not outer.api_key:
+                    self._json(
+                        503,
+                        {
+                            "ok": False,
+                            "error": "call_api_disabled",
+                            "message": "Set CALL_API_KEY in .env to enable POST /api/call",
+                        },
+                    )
                     return
 
                 if not self._auth_ok(body):
@@ -248,8 +268,8 @@ class CallApiServer:
         )
         self._thread.start()
         print(
-            f"[call-api] listening http://{self.host}:{self.port}/api/call "
-            f"(types: announce | ring)",
+            f"[call-api] listening http://{self.host}:{self.port} "
+            f"(GET /api/status; POST /api/call types: announce | ring)",
             flush=True,
         )
 

@@ -2,7 +2,7 @@
   "name": "telefon",
   "displayName": "Telefon",
   "description": "Phone button that announces or rings through the local call API.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "personal",
   "private": true,
   "engines": {
@@ -72,7 +72,7 @@
           "type": "number",
           "default": 10,
           "minimum": 1,
-          "description": "After a task ends, wait this many seconds of not being busy in Cursor before calling. Busy = Cursor focused and recently used (keyboard/mouse). Activity outside Cursor does not suppress the call."
+          "description": "After a task ends, wait this many seconds before calling. If you are busy in Cursor at any point during the wait, the call is cancelled."
         },
         "telefon.notifyMode": {
           "type": "string",

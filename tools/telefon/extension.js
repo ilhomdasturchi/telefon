@@ -5,7 +5,6 @@ const path = require("path");
 const vscode = require("vscode");
 
 const HOOK_COMMAND = "node .cursor/hooks/telefon-stop.cjs";
-const activityPath = path.join(os.homedir(), ".cursor", "telefon-activity.json");
 const pendingPath = path.join(os.homedir(), ".cursor", "telefon-pending.json");
 const CALL_CLIPS = [
   "Vazifa bajarildi",
@@ -375,15 +374,73 @@ class TelefonViewProvider {
   }
 }
 
-let notifyTimer = null;
-let armedAt = 0;
-let placingCall = false;
+const armedPath = path.join(os.homedir(), ".cursor", "telefon-armed.json");
+const presenceDir = path.join(os.homedir(), ".cursor", "telefon-presence");
+const presencePath = path.join(presenceDir, `${process.pid}.json`);
+const FALLBACK_ACTIVE_MS = 10000;
+const PRESENCE_FRESH_MS = 3000;
 
-/** True only when Cursor is focused and the user recently used keyboard/mouse in it. */
-function isBusyInCursor() {
-  const state = vscode.window.state;
-  return Boolean(state.focused && state.active);
+let log = null;
+let notifyTimer = null;
+let placingCall = false;
+let lastEventAt = 0;
+
+function trace(message) {
+  if (log) {
+    log.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
+  }
 }
+
+function markEvent() {
+  lastEventAt = Date.now();
+}
+
+/** This window: focused AND recently used (keyboard/mouse anywhere in it, including chat). */
+function isBusyHere() {
+  const state = vscode.window.state;
+  if (!state.focused) {
+    return false;
+  }
+  if (typeof state.active === "boolean") {
+    return state.active;
+  }
+  return Date.now() - lastEventAt < FALLBACK_ACTIVE_MS;
+}
+
+function writePresence() {
+  try {
+    fsSync.mkdirSync(presenceDir, { recursive: true });
+    fsSync.writeFileSync(presencePath, JSON.stringify({ busy: isBusyHere(), at: Date.now() }));
+  } catch {}
+}
+
+/** Busy in any Cursor window. Activity in other apps never counts. */
+function isBusyInCursor() {
+  if (isBusyHere()) {
+    return true;
+  }
+  let names = [];
+  try {
+    names = fsSync.readdirSync(presenceDir);
+  } catch {
+    return false;
+  }
+  const now = Date.now();
+  return names.some((name) => {
+    try {
+      const entry = JSON.parse(fsSync.readFileSync(path.join(presenceDir, name), "utf8"));
+      return entry.busy && now - Number(entry.at || 0) < PRESENCE_FRESH_MS;
+    } catch {
+      return false;
+    }
+  });
+}
+
+function describeState() {
+  const state = vscode.window.state;
+  return `focused=${state.focused} active=${state.active} anyWindowBusy=${isBusyInCursor()}`;
+}
+
 
 async function placePending(pending) {
   const mode = pending.mode === "announce" ? "announce" : "ring";
@@ -412,85 +469,115 @@ function clearNotifyTimer() {
   }
 }
 
-function armPending() {
-  let pending;
+function readArmedAt() {
   try {
-    pending = JSON.parse(fsSync.readFileSync(pendingPath, "utf8"));
+    return Number(JSON.parse(fsSync.readFileSync(armedPath, "utf8")).at || 0);
   } catch {
+    return 0;
+  }
+}
+
+/** Take ownership of the pending notify so only one Cursor window handles it. */
+function claimPending() {
+  const claimPath = `${pendingPath}.${process.pid}.claim`;
+  try {
+    fsSync.renameSync(pendingPath, claimPath);
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(fsSync.readFileSync(claimPath, "utf8"));
+  } catch {
+    return null;
+  } finally {
+    fsSync.rmSync(claimPath, { force: true });
+  }
+}
+
+function armPending() {
+  const pending = claimPending();
+  if (!pending) {
     return;
   }
   const at = Number(pending.at || 0);
-  if (!at || at === armedAt) {
+  if (!at) {
     return;
   }
   const idleMs = Math.max(1, Number(pending.idleSeconds ?? 10)) * 1000;
-  const maxAgeMs = idleMs + 120000;
-  if (Date.now() - at > maxAgeMs) {
-    fs.rm(pendingPath, { force: true }).catch(() => {});
+  if (Date.now() - at > idleMs + 60000) {
+    trace("stale task-finished signal ignored");
     return;
   }
-  armedAt = at;
+  try {
+    fsSync.mkdirSync(path.dirname(armedPath), { recursive: true });
+    fsSync.writeFileSync(armedPath, `${JSON.stringify({ at, pid: process.pid })}\n`);
+  } catch {}
   clearNotifyTimer();
+  trace(`task finished — waiting ${idleMs / 1000}s (${describeState()})`);
 
   notifyTimer = setInterval(() => {
-    void (async () => {
-      if (placingCall) {
-        return;
-      }
-      if (Date.now() - at > maxAgeMs) {
-        clearNotifyTimer();
-        await fs.rm(pendingPath, { force: true }).catch(() => {});
-        return;
-      }
-      // Only "busy in Cursor" suppresses the call. Outside Cursor never suppresses.
-      if (isBusyInCursor()) {
-        const now = Date.now();
-        fs.mkdir(path.dirname(activityPath), { recursive: true })
-          .then(() => fs.writeFile(activityPath, `${JSON.stringify({ at: now, busy: true })}\n`))
-          .catch(() => {});
-        return;
-      }
-      if (Date.now() - at < idleMs) {
-        return;
-      }
-      placingCall = true;
+    if (placingCall) {
+      return;
+    }
+    if (readArmedAt() !== at) {
       clearNotifyTimer();
-      await fs.rm(pendingPath, { force: true }).catch(() => {});
-      try {
-        await placePending(pending);
-      } catch (error) {
+      trace("newer task finished — this notify replaced");
+      return;
+    }
+    // Busy in Cursor at any moment after the task ended = you saw it; no call.
+    if (isBusyInCursor()) {
+      clearNotifyTimer();
+      trace(`busy in Cursor — call cancelled (${describeState()})`);
+      return;
+    }
+    if (Date.now() - at < idleMs) {
+      return;
+    }
+    clearNotifyTimer();
+    placingCall = true;
+    trace(`not busy in Cursor — calling (${describeState()})`);
+    placePending(pending)
+      .catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
+        trace(`call failed: ${message}`);
         vscode.window.showErrorMessage(`Telefon failed: ${message}`);
-      } finally {
+      })
+      .finally(() => {
         placingCall = false;
-      }
-    })();
+      });
   }, 400);
 }
 
 function watchActivity(context) {
-  const pendingPoll = setInterval(() => {
-    armPending();
-  }, 400);
+  markEvent();
+  writePresence();
+  const pendingPoll = setInterval(armPending, 400);
+  const presencePoll = setInterval(writePresence, 1000);
   context.subscriptions.push(
     { dispose: () => clearInterval(pendingPoll) },
+    { dispose: () => clearInterval(presencePoll) },
     { dispose: () => clearNotifyTimer() },
-    // Cursor's own activity tracker (keyboard/mouse anywhere in the window, including chat).
+    { dispose: () => fsSync.rmSync(presencePath, { force: true }) },
     vscode.window.onDidChangeWindowState(() => {
-      if (isBusyInCursor()) {
-        const now = Date.now();
-        fs.mkdir(path.dirname(activityPath), { recursive: true })
-          .then(() => fs.writeFile(activityPath, `${JSON.stringify({ at: now, busy: true })}\n`))
-          .catch(() => {});
-      }
-    })
+      markEvent();
+      writePresence();
+    }),
+    vscode.workspace.onDidChangeTextDocument(markEvent),
+    vscode.window.onDidChangeTextEditorSelection(markEvent),
+    vscode.window.onDidChangeActiveTextEditor(markEvent),
+    vscode.window.onDidChangeTextEditorVisibleRanges(markEvent),
+    vscode.window.onDidChangeActiveTerminal(markEvent)
   );
 }
 
 function activate(context) {
+  log = vscode.window.createOutputChannel("Telefon");
+  context.subscriptions.push(log);
+  const version = context.extension?.packageJSON?.version || "?";
+  trace(`Telefon ${version} active`);
   const button = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100000);
   button.command = "telefon.show";
-  button.tooltip = "Open Telefon";
+  button.tooltip = `Open Telefon (v${version})`;
   const watchingColor = new vscode.ThemeColor("statusBarItem.warningBackground");
   const setWatching = (installed) => {
     button.text = installed ? "Telefon on" : "Telefon";

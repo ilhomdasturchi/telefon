@@ -27,9 +27,11 @@ import time
 from dotenv import load_dotenv
 
 from app_paths import env_path
+from app_log import setup_file_logging
 
 # Load .env before config so BIND_IP / GEMINI_* apply at import time.
 load_dotenv(env_path())
+setup_file_logging()
 
 import truststore
 
