@@ -6,6 +6,7 @@
     "build": "powershell -NoProfile -ExecutionPolicy Bypass -File build_exe.ps1",
     "build:backend": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"python -m PyInstaller --noconfirm --clean AiPhone.spec\"",
     "desktop:run": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location desktop; neu run\"",
-    "desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location desktop; neu build --release\""
+    "desktop:build": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location desktop; neu build --release\"",
+    "upload:update": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/upload-telefon-update.ps1"
   }
 }

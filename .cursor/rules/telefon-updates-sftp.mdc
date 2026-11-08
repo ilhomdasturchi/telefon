@@ -1,0 +1,23 @@
+---
+description: Telefon app update hosting via marvar.id media + SFTP
+alwaysApply: true
+---
+
+# Telefon updates (marvar.id)
+
+Public media base (clients check/download from here):
+
+- Base: `https://marvar.id/media/telefon/`
+- Update URL (shell default): `https://marvar.id/media/telefon/telefon.exe`
+- Manifest: `https://marvar.id/media/telefon/update.json`
+- Package: `https://marvar.id/media/telefon/telefon.zip`
+
+SFTP publish target (maps to that media folder):
+
+- Host: `marvar.id`
+- Port: `2022` (SFTP)
+- User: `cursor`
+- Password: `simsim@qiyinekan`
+- Remote dir: `/telefon/`
+
+After `npm run build`, artifacts upload automatically via Paramiko SFTP into `/telefon/` (`npm run upload:update` to retry). Credentials live in `.env` (`TELEFON_SFTP_*`, `TELEFON_UPDATE_*`). Do not commit real passwords to git-tracked examples.

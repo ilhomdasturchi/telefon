@@ -10,6 +10,41 @@ Set-Location $Root
 
 $env:NODE_OPTIONS = "--use-system-ca"
 
+function Import-DotEnv([string]$Path) {
+    if (-not (Test-Path $Path)) { return }
+    Get-Content $Path | ForEach-Object {
+        $line = $_.Trim()
+        if (-not $line -or $line.StartsWith("#") -or -not $line.Contains("=")) { return }
+        $eq = $line.IndexOf("=")
+        $key = $line.Substring(0, $eq).Trim()
+        $val = $line.Substring($eq + 1).Trim()
+        if ($key) { Set-Item -Path "Env:$key" -Value $val }
+    }
+}
+
+function Publish-TelefonUpdate {
+    if (-not $env:TELEFON_SFTP_HOST -or -not $env:TELEFON_SFTP_USER -or -not $env:TELEFON_SFTP_PASSWORD) {
+        Write-Host "SFTP upload skipped (set TELEFON_SFTP_* in .env)."
+        return
+    }
+    Write-Host "Uploading update artifacts via SFTP..."
+    python -m pip install -q paramiko
+    python (Join-Path $Root "scripts\upload_telefon_update.py")
+    if ($LASTEXITCODE -ne 0) { throw "SFTP upload failed" }
+}
+
+Import-DotEnv (Join-Path $Root ".env")
+$UpdateBase = if ($env:TELEFON_UPDATE_BASE_URL) {
+    $env:TELEFON_UPDATE_BASE_URL.TrimEnd("/")
+} else {
+    "https://marvar.id/media/telefon"
+}
+$UpdateUrl = if ($env:TELEFON_UPDATE_URL) {
+    $env:TELEFON_UPDATE_URL.Trim()
+} else {
+    "$UpdateBase/telefon.exe"
+}
+
 function Ensure-NeutralinoBinaries {
     $Desktop = Join-Path $Root "desktop"
     $WinBin = Join-Path $Desktop "bin\neutralino-win_x64.exe"
@@ -130,7 +165,7 @@ if (Test-Path $configPath) {
 $manifest = [ordered]@{
     version     = $version
     sha256      = $hash
-    url         = "https://telefon.telepat.uz/soft/telefon.zip"
+    url         = "$UpdateBase/telefon.zip"
     publishedAt = (Get-Date).ToUniversalTime().ToString("o")
 }
 $ManifestPath = Join-Path $Root "dist\update.json"
@@ -146,7 +181,8 @@ $state = [ordered]@{
 ($state | ConvertTo-Json -Depth 5) | Set-Content -Path (Join-Path $Portable "update-state.json") -Encoding utf8
 
 # Also stage a launcher copy name for manual / Update URL hosting
-Copy-Item (Join-Path $Portable "telefon.exe") (Join-Path $Root "dist\telefon.exe") -Force
+$DistTelefonExe = Join-Path $Root "dist\telefon.exe"
+Copy-Item (Join-Path $Portable "telefon.exe") $DistTelefonExe -Force
 
 $sizeMb = [math]::Round((Get-Item $Exe).Length / 1MB, 1)
 $zipMb = [math]::Round((Get-Item $Zip).Length / 1MB, 1)
@@ -157,11 +193,16 @@ Write-Host "  Portable: $Portable"
 Write-Host "  Zip     : $Zip ($zipMb MB)"
 Write-Host "  Manifest: $ManifestPath"
 Write-Host "  SHA-256 : $hash"
+Write-Host "  Check URL: $UpdateUrl"
 Write-Host ""
-Write-Host "Upload to https://telefon.telepat.uz/soft/ :"
-Write-Host "  1) dist\update.json"
-Write-Host "  2) dist\telefon.zip"
-Write-Host "  3) dist\telefon.exe   (Update URL / manual download)"
+
+Publish-TelefonUpdate -ManifestPath $ManifestPath -ZipPath $Zip -ExePath $DistTelefonExe
+
+Write-Host ""
+Write-Host "Public check/download:"
+Write-Host "  $UpdateBase/update.json"
+Write-Host "  $UpdateBase/telefon.zip"
+Write-Host "  $UpdateUrl"
 Write-Host ""
 Write-Host "Server install: unzip telefon.zip, put .env beside telefon.exe, run telefon.exe"
 Write-Host "First Enable (or auto-start) runs AiPhone.exe --no-autostart; shell owns login autostart."

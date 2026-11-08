@@ -21,7 +21,7 @@
     "window.*"
   ],
   "globalVariables": {
-    "DEFAULT_UPDATE_URL": "https://telefon.telepat.uz/soft/telefon.exe",
+    "DEFAULT_UPDATE_URL": "https://marvar.id/media/telefon/telefon.exe",
     "CALL_API_PORT": "8088"
   },
   "modes": {

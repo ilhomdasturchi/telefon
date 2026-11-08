@@ -2,7 +2,7 @@
 
 const DEFAULT_UPDATE_URL =
   (typeof NL_DEFAULT_UPDATE_URL === "string" && NL_DEFAULT_UPDATE_URL) ||
-  "https://telefon.telepat.uz/soft/telefon.exe";
+  "https://marvar.id/media/telefon/telefon.exe";
 const CALL_API_PORT =
   (typeof NL_CALL_API_PORT === "string" && NL_CALL_API_PORT) || "8088";
 
@@ -243,7 +243,7 @@ function manifestUrlFromUpdateUrl(updateUrl) {
     u.hash = "";
     return u.toString();
   } catch {
-    return "https://telefon.telepat.uz/soft/update.json";
+    return "https://marvar.id/media/telefon/update.json";
   }
 }
 
