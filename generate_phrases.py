@@ -238,6 +238,40 @@ def main() -> int:
         if preferred and preferred.startswith("gemini:"):
             time.sleep(3)
 
+    from generate_greeting import synthesize_edge as synthesize_edge_raw
+
+    clip_dir = Path(getattr(config, "CALL_CLIP_DIR", "assets/call"))
+    clip_dir.mkdir(parents=True, exist_ok=True)
+    voice = getattr(config, "EDGE_TTS_VOICE", "uz-UZ-MadinaNeural")
+    rate = getattr(config, "CRITICAL_TTS_RATE", "-20%")
+    pitch = getattr(config, "CRITICAL_TTS_PITCH", "-2Hz")
+    print(f"call clips out={clip_dir} voice={voice} rate={rate}")
+    for item in getattr(config, "CALL_CLIPS", ()):
+        out = clip_dir / f"{item['id']}.wav"
+        speak = item["speak"]
+        if out.is_file() and out.stat().st_size > 1000 and not args.force:
+            print(f"  skip  [call] {speak!r}")
+            continue
+        print(f"  -> [call] {speak!r}")
+        try:
+            wav = asyncio.run(synthesize_edge_raw(speak, voice, rate, pitch))
+            out.write_bytes(wav)
+            print(f"     wrote {out.stat().st_size} bytes via edge")
+        except Exception as exc:  # noqa: BLE001
+            print(f"     edge failed: {exc}; trying fallback")
+            try:
+                wav, eng = synthesize_with_fallback(
+                    speak,
+                    "Calm Uzbek phone voice.",
+                    getattr(config, "PHRASE_TTS_VOICE", "Kore"),
+                    "edge",
+                )
+                out.write_bytes(wav)
+                print(f"     wrote {out.stat().st_size} bytes via {eng}")
+            except Exception as fallback_exc:  # noqa: BLE001
+                print(f"     FAILED: {fallback_exc}")
+                return 1
+
     print("Done.")
     return 0
 

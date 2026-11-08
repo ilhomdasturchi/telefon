@@ -119,6 +119,27 @@ def _prepare_message_for_tts(text: str) -> str:
     return text
 
 
+def _clip_key(text: str) -> str:
+    text = _prepare_message_for_tts(text).casefold()
+    return re.sub(r"[^0-9a-z']+", "", text)
+
+
+def _prepared_call_clip(text: str):
+    """Return a prepared Uzbek WAV when this line is one of the fixed call clips."""
+    from pathlib import Path
+
+    root = Path(getattr(config, "CALL_CLIP_DIR", "") or "")
+    key = _clip_key(text)
+    if not key or not root.is_dir():
+        return None
+    for item in getattr(config, "CALL_CLIPS", ()):
+        if _clip_key(str(item.get("speak") or "")) != key:
+            continue
+        path = root / f"{item['id']}.wav"
+        return path if path.is_file() else None
+    return None
+
+
 def _alert_speak_line(alert: dict[str, Any]) -> str:
     """Prefer full message text for the phone; short speak labels are fallback only."""
     message = _prepare_message_for_tts(str(alert.get("message") or ""))
@@ -254,11 +275,19 @@ def announce_alerts_on_phone(
     body = combine_alert_speaks(alerts).strip() or "Critical alert."
     repeats = max(1, int(getattr(config, "CRITICAL_REPEAT_COUNT", 2) or 2))
     ring_sec = float(getattr(config, "CRITICAL_RING_SEC", 15) or 15)
-    print(
-        f"[critical] TTS once for {extension}: {body!r} "
-        f"(then bridge wav, then replay x{repeats})",
-        flush=True,
-    )
+    prepared = _prepared_call_clip(body)
+    if prepared is not None:
+        print(
+            f"[critical] prerecorded {prepared.name} for {extension}: {body!r} "
+            f"(then bridge wav, then replay x{repeats})",
+            flush=True,
+        )
+    else:
+        print(
+            f"[critical] TTS once for {extension}: {body!r} "
+            f"(then bridge wav, then replay x{repeats})",
+            flush=True,
+        )
 
     ok = pbx.dial(extension, ring_seconds=ring_sec, connect_tone=False)
     if not ok or not pbx.call or not pbx.call.remote_rtp:
@@ -276,17 +305,22 @@ def announce_alerts_on_phone(
         remote=call.remote_rtp,
     )
     msg_path: Path | None = None
+    delete_msg = False
     try:
         bridge.start()
         # Let RTP settle — otherwise the opening words of the message get clipped.
         lead_ms = int(getattr(config, "CRITICAL_LEAD_SILENCE_MS", 600) or 0)
         _play_lead_silence(bridge, lead_ms)
 
-        wav, engine = _tts_alert_wav(body)
-        print(f"[critical] TTS via {engine}", flush=True)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp.write(wav)
-            msg_path = Path(tmp.name)
+        if prepared is not None:
+            msg_path = prepared
+        else:
+            wav, engine = _tts_alert_wav(body)
+            print(f"[critical] TTS via {engine}", flush=True)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp.write(wav)
+                msg_path = Path(tmp.name)
+            delete_msg = True
 
         # 1) message  2) prerecorded qaytaraman  3) same message file again
         _play_wav_path(bridge, msg_path, label="msg-1")
@@ -321,7 +355,7 @@ def announce_alerts_on_phone(
         print(f"[critical] announce error: {exc}", flush=True)
         return False
     finally:
-        if msg_path is not None:
+        if delete_msg and msg_path is not None:
             try:
                 msg_path.unlink(missing_ok=True)
             except OSError:

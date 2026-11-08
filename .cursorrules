@@ -1,0 +1,8 @@
+# BEGIN git-commit-short
+When generating a Git commit message for this repository:
+- Output exactly ONE short subject line
+- Max ~50 characters (hard cap 72)
+- Imperative mood: Fix..., Add..., Scale...
+- No body, no bullets, no file-by-file summary
+- Never start with "This commit..."
+# END git-commit-short

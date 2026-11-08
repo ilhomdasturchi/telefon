@@ -98,6 +98,13 @@ CALL_API_HOST = (os.environ.get("CALL_API_HOST") or "0.0.0.0").strip() or "0.0.0
 CALL_API_PORT = int((os.environ.get("CALL_API_PORT") or "8088").strip() or "8088")
 CALL_API_KEY = (os.environ.get("CALL_API_KEY") or "").strip()
 CALL_API_RING_SEC = float((os.environ.get("CALL_API_RING_SEC") or "2").strip() or "2")
+# Fixed Cursor notify lines. WAV is prepared ahead of time; announce plays the file.
+CALL_CLIP_DIR = os.path.join(_RESOURCE_DIR, "assets", "call")
+CALL_CLIPS = (
+    {"id": "vazifa_bajarildi", "speak": "Vazifa bajarildi"},
+    {"id": "kompyuterga_qaravoring", "speak": "Kompyuterga qaravoring"},
+    {"id": "yuklatilgan_vazifa_bajarildi", "speak": "Yuklatilgan vazifa bajarildi"},
+)
 
 # Namozga prayer times (ibodat.marvar.id) — today + tomorrow for Gemini tool
 NAMOZGA_BASE_URL = (

@@ -1,0 +1,22 @@
+{
+  "name": "telefon-git-commit-rule",
+  "displayName": "Git Commit Rule Toggle",
+  "description": "Status-bar button to install/uninstall short Git commit Cursor rules",
+  "version": "0.0.1",
+  "publisher": "telefon",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "telefon.toggleGitCommitRule",
+        "title": "Toggle Git Commit Rule",
+        "icon": "$(sparkle)"
+      }
+    ]
+  }
+}
